@@ -9,7 +9,7 @@ num_posts = None
 
 user = 'meisamlg2021'
 user1 = 'shomaei12'
-pass_ = 'Parsian46321'
+pass_ = 'Parsian6767'
 user2 = 'meisam9229'
 user3 = 'meisamghafarilan'
 user4 = 'meisam.ghafar.g'
