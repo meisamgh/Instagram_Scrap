@@ -5,10 +5,9 @@ page_name = 'Aliazimiofficial'
 path = '/Users/meisamghafary/Desktop/Squad/Scrap_instagram'
 num_posts = None
 
-pass_ = 'Parsian46321'
+pass_ = 'Parsian4667676'
 user = 'meisamlg2021'
 user1 = 'shomaei12'
-pass_ = 'Parsian46321'
 user2 = 'meisam9229'
 user3 = 'meisamghafarilan'
 user4 = 'meisam.ghafar.g'
