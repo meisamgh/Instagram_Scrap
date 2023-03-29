@@ -12,10 +12,9 @@ page_name = 'Aliazimiofficial'
 path = '/Users/meisamghafary/Desktop/Squad/Scrap_instagram'
 
 
-pass_ = 'Parsian46321'
+pass_ = 'oiuoiuo989'
 user = 'meisamlg2021'
 user1 = 'shomaei12'
-pass_ = 'Parsian46321'
 user2 = 'meisam9229'
 user3 = 'meisamghafarilan'
 user4 = 'meisam.ghafar.g'
