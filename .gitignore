@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Session and authentication artifacts
+sessions/
+*.cookie
+cookies.json
+
+# Local data / scraper outputs
+data/
+Data_*/
+*.csv
+*.json
+*.rar
+*.zip
+
+# Logs
+*.log
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Selenium / local binaries
+chromedriver
+chromedriver.exe
