@@ -1,0 +1,13 @@
+# Compatibility-oriented dependencies for the legacy codebase.
+# Modernizing the project should include updating these packages and the code that depends on them.
+
+requests>=2.25,<3
+numpy>=1.20,<2
+pandas>=1.3,<2
+tqdm>=4.60,<5
+python-slugify>=5,<9
+beautifulsoup4>=4.9,<5
+lxml>=4.6,<6
+selenium>=3.141,<4.3
+fake-useragent>=0.1,<2
+pyautogui>=0.9,<1
