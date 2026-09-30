@@ -1,178 +1,140 @@
-# Instagram Data Collection Toolkit
+# Instagram Scrap
 
-A Python toolkit for collecting public Instagram engagement data such as posts, comments, replies, likes, and follower information. The repository also contains legacy browser-automation experiments built with Selenium.
+Python tools for collecting public Instagram engagement data such as comments, replies, likes, and followers.
 
-> **Status:** Legacy / research project. The project was originally built around Instagram web endpoints and page structures available at the time. Instagram changes its internal APIs and frontend frequently, so parts of the code may require modernization before they work reliably today.
+> This is a legacy/research project. It uses Instagram web/internal endpoints, so endpoint changes or anti-automation controls can break collection.
 
-## Overview
+## What It Collects
 
-The project contains two main areas:
+- comments and replies
+- post likes and liker metadata
+- followers
+- basic post/profile metadata
 
-1. **Data collection** — scripts for extracting public engagement data and storing results as CSV files.
-2. **Legacy browser automation** — Selenium-based experiments for automating browser flows.
-
-The data-collection workflow uses a bundled `igramscraper` client that manages authentication, requests, pagination, and model conversion.
-
-## Repository Structure
+## Structure
 
 ```text
 Instagram_Scrap/
-├── Comment_scrap.py                 # Collect comments and replies
-├── Like_scrap.py                    # Collect likes and liker metadata
-├── get_follwers.py                  # Collect follower information
-├── Instagram_Account_Creator.py     # Legacy Selenium automation experiment
-├── Instagram_Account_Creator_Proxy.py
-├── igramscraper/                    # Custom Instagram client and models
-├── requirements.txt                 # Python dependencies
-└── README.md
+├── Comment_scrap.py          # comments + replies
+├── Like_scrap.py             # likes
+├── get_followers.py          # followers
+├── get_follwers.py           # old-name compatibility wrapper
+├── scraper_runtime.py        # config, login, retries, logging, storage
+├── igramscraper/             # Instagram client and response models
+├── requirements.txt          # core scraper dependencies
+└── requirements-legacy.txt   # old Selenium experiments
 ```
 
-## Core Workflow
-
-```text
-Instagram account/session
-        │
-        ▼
-  igramscraper client
-        │
-        ├── profile & media discovery
-        ├── comments / replies
-        ├── likes
-        └── followers
-        │
-        ▼
- pagination + checkpointing
-        │
-        ▼
-       CSV files
-```
-
-The scraper rotates between configured sessions and periodically saves intermediate results so that long-running collection jobs can preserve progress.
-
-## Features
-
-- Collect profile and media metadata
-- Collect post comments and threaded replies
-- Collect likes and basic liker metadata
-- Collect follower information
-- Paginated collection for larger datasets
-- Multi-session/account rotation
-- Periodic CSV checkpointing
-- Custom Instagram response models
-- Optional proxy/browser automation experiments
-
-## Installation
-
-### 1. Clone the repository
+## Setup
 
 ```bash
 git clone https://github.com/meisamgh/Instagram_Scrap.git
 cd Instagram_Scrap
-```
 
-### 2. Create a virtual environment
-
-```bash
 python -m venv .venv
 source .venv/bin/activate
-```
-
-On Windows:
-
-```bash
-.venv\Scripts\activate
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
+
+cp .env.example .env
 ```
 
-Because this is a legacy project, compatibility can depend on the Python, pandas, Selenium, and Instagram endpoint versions being used.
+Add credentials to `.env`:
 
-## Configuration
+```env
+INSTAGRAM_USERNAME=your_username
+INSTAGRAM_PASSWORD=your_password
+OUTPUT_PATH=./data
+```
 
-Do **not** store usernames, passwords, cookies, proxy credentials, or other secrets directly in committed source files.
+For multiple accounts, use `INSTAGRAM_ACCOUNTS_JSON` as shown in `.env.example`.
 
-For local development, keep sensitive configuration outside Git and load it from environment variables or an ignored local configuration file.
+Never commit `.env`, passwords, cookies, or session files.
 
-Example environment variables:
+## Usage
+
+Comments:
 
 ```bash
-export INSTAGRAM_USERNAME="your_username"
-export INSTAGRAM_PASSWORD="your_password"
-export OUTPUT_PATH="./data"
+python Comment_scrap.py target_username
 ```
 
-The existing scripts contain legacy inline configuration and should be refactored to consume environment-based configuration before production use.
+Likes:
+
+```bash
+python Like_scrap.py target_username
+```
+
+Followers:
+
+```bash
+python get_followers.py target_username
+```
+
+Resume an interrupted job:
+
+```bash
+python Comment_scrap.py target_username --resume
+```
+
+Useful options:
+
+```text
+--output-dir ./data
+--num-posts 100
+--page-size 50
+--request-attempts 4
+--request-delay 0.5
+--log-level INFO
+```
+
+## How It Works
+
+```text
+configured Instagram sessions
+          ↓
+     igramscraper
+          ↓
+ comments / likes / followers
+          ↓
+ bounded retry + pagination
+          ↓
+ checkpoint files + CSV output
+```
+
+Long-running jobs save checkpoint state so they can resume after interruption. CSV files are written atomically to reduce the chance of corrupted output.
 
 ## Output
 
-Depending on the script, generated data can include:
-
-- `comments.csv`
-- `replay.csv`
-- `likes.csv`
-- `followers_info.csv`
-- `page_info.csv`
-- pagination/checkpoint CSV files
-
-Generated datasets, sessions, cookies, and local credentials should remain outside version control.
-
-## Technical Notes
-
-The bundled client relies on Instagram web requests and internal GraphQL-style endpoints. These endpoints are not a stable public API and can change without notice.
-
-The Selenium scripts also use browser selectors and APIs that were valid when the project was created. Modern Selenium versions and the current Instagram UI may require updated locators and WebDriver initialization.
-
-## Known Limitations
-
-- Instagram internal endpoints can change or disappear.
-- Login and checkpoint flows can change over time.
-- Rate limiting and anti-automation controls may interrupt collection.
-- Some Selenium APIs used by the legacy scripts are deprecated in modern Selenium.
-- Several scripts currently combine configuration, collection, retry logic, and persistence in one module.
-- There is currently no automated test suite.
-
-## Recommended Modernization
-
-A cleaner production-oriented architecture would separate:
+Files are written under:
 
 ```text
-src/
-├── client.py
-├── config.py
-├── comments.py
-├── likes.py
-├── followers.py
-├── storage.py
-└── cli.py
+data/Data_<username>/
 ```
 
-Recommended next steps:
+Typical outputs include:
 
-- move all secrets to environment variables
-- replace hard-coded local filesystem paths
-- introduce structured logging
-- add bounded retries with exponential backoff
-- add typed configuration and CLI arguments
-- add unit/integration tests
-- modernize pandas and Selenium usage
-- replace obsolete Instagram endpoint assumptions
+```text
+comments.csv
+replies.csv
+likes.csv
+followers_info.csv
+page_info.csv
+*_checkpoint.json
+```
 
-## Responsible Use
+## Legacy Browser Automation
 
-Use this project only in ways that respect applicable laws, privacy requirements, platform rules, and the rights of account holders. Avoid collecting or storing personal data that you do not have a legitimate reason to process.
+`Instagram_Account_Creator.py` and `Instagram_Account_Creator_Proxy.py` are historical Selenium experiments and are not part of the supported scraping path.
 
-This project is not affiliated with, endorsed by, or maintained by Instagram or Meta.
+If you need to inspect them, install the optional legacy dependencies:
 
-## Author
+```bash
+pip install -r requirements-legacy.txt
+```
 
-**Meisam Ghafarlangroudi**
+## Important Notes
 
-Data Science / Machine Learning / Data Engineering
-
----
-
-If you are using this repository as a portfolio project, the strongest next improvement is to modernize the scraper client and separate configuration, collection, storage, and retry logic into testable modules.
+- Instagram internal endpoints are not a stable public API.
+- Use bounded request rates and respect platform rules and applicable privacy laws.
+- Do not collect or retain personal data without a legitimate reason.
+- This project is not affiliated with Instagram or Meta.
