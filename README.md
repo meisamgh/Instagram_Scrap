@@ -1,5 +1,9 @@
 # Instagram Scrap
 
+<p align="center">
+  <img src="Instagram Scrapper.png" alt="Instagram Scrapper" width="100%">
+</p>
+
 Python tools for collecting public Instagram engagement data such as comments, replies, likes, and followers.
 
 > This is a legacy/research project. It uses Instagram web/internal endpoints, so endpoint changes or anti-automation controls can break collection.
