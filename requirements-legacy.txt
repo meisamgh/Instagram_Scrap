@@ -1,0 +1,5 @@
+# Optional dependencies for the archived Selenium/browser automation scripts.
+-r requirements.txt
+selenium>=3.141,<4.3
+fake-useragent>=1,<2
+pyautogui>=0.9,<1
