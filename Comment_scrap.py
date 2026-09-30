@@ -1,239 +1,203 @@
+"""Collect comments and replies for a public Instagram account.
 
-''''' Data Entry'''
-### please enter the page name and give an address for saving data ####
-page_name = 'Aliazimiofficial'
-path = '/Users/meisamghafary/Desktop/Squad/Scrap_instagram'
-num_posts = None
+Credentials are loaded from environment variables; see .env.example.
+"""
 
-pass_ = 'Parsian4667676'
-user = 'meisamlg2021'
-user1 = 'shomaei12'
-user2 = 'meisam9229'
-user3 = 'meisamghafarilan'
-user4 = 'meisam.ghafar.g'
-u5 = 'meisamlkj'
-u6= 'meisamscrap5'
-u7 = 'meisam_scrap'
-u8 = 'Meisam4_Scrap'
-u9 = 'meisam_scarp5'
-u10 = 'meisamscrap6'
-u11 = 'meisamscrap7'
-u12 = 'meisamscrap8'
+from __future__ import annotations
 
-users=[(u8, pass_), (u10, pass_), (user, pass_), (user2, pass_)]
-
-
-""" This part is executed automatically"""
+import argparse
+import logging
 import os
-mak_path = path + '/Data_{}'.format(page_name)
-if os.path.isdir(mak_path)== False:
-    os.mkdir(mak_path)
-
-path_data = path + '/Data_{}'.format(page_name)
-path_save_comment = path_data+'/comments.csv'
-path_page_id = path_data+'/max_ID_comments.csv'
-path_replay = path_data+'/replay.csv'
-path_user_info = path_data+'/user_inof.csv'
-page_info = path_data +'/page_info.csv'
-
-os.chdir(path)
-
-from igramscraper.instagram import Instagram
-
 import time
-from tqdm import tqdm
+from typing import Any
+
 import pandas as pd
-import numpy as np
-import random
-import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
-def save_dln(comments,replay, pages):
-    comments.reset_index(inplace = True)
-    comments.rename(columns = {'identifier':'id_comments',
-                               'level_0':'short_codes'}, 
-                    inplace = True)
+from scraper_runtime import (
+    atomic_write_csv,
+    build_clients,
+    choose_client,
+    configure_logging,
+    load_csv,
+    load_json,
+    output_directory,
+    retry_call,
+    save_json,
+)
 
-    c = [cc.__dict__ for cc in comments.owner]
-    df = pd.DataFrame(c)
-    comments = pd.concat([df, comments], 1)
-    comments.rename(columns = {'identifier':'user_ID'}, 
-                    inplace = True)
-    
-    comments['scraping_time'] = datetime.datetime.now()
-    comments.to_csv(path_save_comment, index=False)
-    pd.DataFrame(pages, index = ['max_id']).T.to_csv(path_page_id)
-    replay.to_csv(path_replay)
+LOGGER = logging.getLogger("comments")
 
 
-def data_frame_comments(comment_all):
-    result_cmm = {}
-    for k,v in comment_all.items():
-        c = [cc.__dict__ for cc in v]
-        result_cmm[k]= pd.DataFrame(c)
-    comments = pd.concat(result_cmm)    
-    return comments
+def objects_to_frame(short_code: str, objects: list[Any]) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for item in objects:
+        row = dict(vars(item))
+        owner = row.pop("owner", None)
+        row["id_comments"] = row.pop("identifier", None)
+        row["short_code"] = short_code
+        if owner is not None:
+            owner_data = dict(vars(owner))
+            row["user_ID"] = owner_data.pop("identifier", None)
+            for key, value in owner_data.items():
+                row.setdefault(f"owner_{key}", value)
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
-
-if not 'total_connect'  in globals():
-    total_connect = []
-    cn = 0
-    for i in users:
-        cn += 1
-        globals()['instagram_%s' % cn] = Instagram(0)
-        inst = globals()['instagram_%s' % cn]
-        u, p = i
-        print(u)
-        inst.with_credentials(u, p)
-        inst.login()
-        print(inst.get_account(f'{page_name}'))
-        total_connect.append(inst)
+def replies_to_frame(short_code: str, replies: Any) -> pd.DataFrame:
+    if replies is None:
+        return pd.DataFrame()
+    if isinstance(replies, pd.DataFrame):
+        frame = replies.copy()
+    elif isinstance(replies, list):
+        frame = pd.DataFrame([dict(vars(item)) if hasattr(item, "__dict__") else item for item in replies])
+    else:
+        return pd.DataFrame()
+    if not frame.empty and "short_code" not in frame.columns:
+        frame["short_code"] = short_code
+    return frame
 
 
-acc = total_connect[0].get_account(page_name)
-page_ = acc.__dict__
-num_of_posts = np.where(num_posts!=None ,num_posts, page_['media_count'])
+def save_outputs(
+    comments: pd.DataFrame,
+    replies: pd.DataFrame,
+    output_dir,
+    state: dict[str, Any],
+) -> None:
+    if not comments.empty and "id_comments" in comments.columns:
+        comments = comments.drop_duplicates(subset=["id_comments"], keep="last")
+    if not replies.empty:
+        dedupe_key = "identifier" if "identifier" in replies.columns else None
+        replies = replies.drop_duplicates(subset=[dedupe_key] if dedupe_key else None, keep="last")
+
+    atomic_write_csv(comments, output_dir / "comments.csv", index=False)
+    atomic_write_csv(replies, output_dir / "replies.csv", index=False)
+    save_json(state, output_dir / "comments_checkpoint.json")
 
 
-print(f"\n **** Toal number of media is {num_of_posts} **** ")
-print('\n **** Info Pages are downloading .... please wait ...****')
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Collect Instagram comments and replies")
+    parser.add_argument("page_name", help="Target public Instagram username")
+    parser.add_argument("--output-dir", default=os.getenv("OUTPUT_PATH", "./data"))
+    parser.add_argument("--num-posts", type=int, default=None)
+    parser.add_argument("--page-size", type=int, default=50)
+    parser.add_argument("--checkpoint-seconds", type=int, default=300)
+    parser.add_argument("--request-attempts", type=int, default=4)
+    parser.add_argument("--max-item-failures", type=int, default=3)
+    parser.add_argument("--request-delay", type=float, default=0.5)
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--log-level", default="INFO")
+    return parser.parse_args()
 
 
-media = total_connect[0].get_medias(page_name, num_of_posts)
-c = [cc.__dict__ for cc in media]
-df = pd.DataFrame(c)
-df.to_csv(page_info)
+def main() -> int:
+    args = parse_args()
+    configure_logging(args.log_level)
 
-all_lik  = df.comments_count.sum()
-print(f'\n **** Number of comments is {all_lik} ****')
-print( f'\n Elapsed time is {round(all_lik/(20*3600),2)} hours')
+    output_dir = output_directory(args.output_dir, args.page_name)
+    checkpoint_path = output_dir / "comments_checkpoint.json"
+    page_info_path = output_dir / "page_info.csv"
 
-if round(all_lik/(20*3600),2)>24:
-   print( f'\n Elapsed time is {round(all_lik/(20*3600)/24,2)} days')
+    clients = build_clients(mode=0)
+    account = retry_call(
+        clients[0].get_account,
+        args.page_name,
+        attempts=args.request_attempts,
+    )
 
+    checkpoint = load_json(checkpoint_path) if args.resume else {}
+    if args.resume and page_info_path.exists():
+        media_frame = load_csv(page_info_path)
+    else:
+        media_count = int(getattr(account, "media_count", 0) or 0)
+        num_posts = args.num_posts if args.num_posts is not None else media_count
+        media = retry_call(
+            clients[0].get_medias,
+            args.page_name,
+            num_posts,
+            attempts=args.request_attempts,
+        )
+        media_frame = pd.DataFrame([dict(vars(item)) for item in media])
+        atomic_write_csv(media_frame, page_info_path, index=False)
 
-short_codes = df.short_code.to_list()
+    if "short_code" not in media_frame.columns:
+        raise RuntimeError("Could not find post short codes in Instagram response")
 
-cnt = 0
-likes_all = {}
-pages = {k: None for k in short_codes}
-comment_all = {k: [] for k in short_codes}
+    short_codes = [str(value) for value in media_frame["short_code"].dropna().tolist()]
+    cursors = checkpoint.get("cursors", {}) if checkpoint else {}
+    pending = checkpoint.get("pending", short_codes.copy()) if checkpoint else short_codes.copy()
+    failures = checkpoint.get("failures", {}) if checkpoint else {}
+    failed = checkpoint.get("failed", []) if checkpoint else []
 
+    comments = load_csv(output_dir / "comments.csv") if args.resume else pd.DataFrame()
+    replies = load_csv(output_dir / "replies.csv") if args.resume else pd.DataFrame()
+    last_checkpoint = time.monotonic()
 
-all_replay = pd.DataFrame()
-first_time = time.time()
+    LOGGER.info("Starting comment collection for %s (%s posts pending)", args.page_name, len(pending))
 
+    while pending:
+        progress_this_pass = False
+        for short_code in list(pending):
+            previous_cursor = cursors.get(short_code)
+            client = choose_client(clients)
+            try:
+                batch, max_id, has_next, batch_replies = retry_call(
+                    client.get_media_comments_by_code,
+                    short_code,
+                    args.page_size,
+                    max_id=previous_cursor,
+                    attempts=args.request_attempts,
+                )
+            except Exception as exc:
+                failures[short_code] = int(failures.get(short_code, 0)) + 1
+                LOGGER.error("Post %s failed: %s", short_code, exc)
+                if failures[short_code] >= args.max_item_failures:
+                    pending.remove(short_code)
+                    failed.append(short_code)
+                    LOGGER.error("Giving up on post %s after %s failures", short_code, failures[short_code])
+                continue
 
-while len(short_codes) > 0:
-#    print(f'start Time is {datetime.datetime.now()}')
-    for i in tqdm(short_codes):
-        if time.time() - first_time >300:
-            comm  = data_frame_comments(comment_all)
-            save_dln(comm, all_replay, pages)
-            first_time = time.time()
-        instagram = random.choice(total_connect)
-        try:
-            comm, max_id, next_page, replay = instagram.get_media_comments_by_code(i, 50, max_id=pages[i])
-            
-        except Exception as e:
-            print(f'\n {e}')
-            continue         
+            progress_this_pass = True
+            failures[short_code] = 0
+            comments = pd.concat([comments, objects_to_frame(short_code, batch)], ignore_index=True)
+            replies = pd.concat([replies, replies_to_frame(short_code, batch_replies)], ignore_index=True)
 
-        comment_all[i] = [*comment_all[i], *comm]
-        all_replay = pd.concat([all_replay, replay],0)
+            if has_next and max_id and max_id != previous_cursor:
+                cursors[short_code] = max_id
+            else:
+                pending.remove(short_code)
 
-        if ((next_page) | (len(comm)==0)):
-            pages[i] = max_id
-        else:
-            short_codes.remove(i)
+            if args.request_delay > 0:
+                time.sleep(args.request_delay)
 
+            if time.monotonic() - last_checkpoint >= args.checkpoint_seconds:
+                state = {
+                    "page_name": args.page_name,
+                    "cursors": cursors,
+                    "pending": pending,
+                    "failures": failures,
+                    "failed": sorted(set(failed)),
+                }
+                save_outputs(comments, replies, output_dir, state)
+                LOGGER.info("Checkpoint saved (%s posts pending)", len(pending))
+                last_checkpoint = time.monotonic()
 
-comm  = data_frame_comments(comment_all)
-save_dln(comm, all_replay, pages)
+        if not progress_this_pass and pending:
+            LOGGER.warning("No progress in this pass; sleeping before retrying pending posts")
+            time.sleep(max(1.0, args.request_delay))
 
-
-c = [cc.__dict__ for cc in comm.owner]
-df = pd.DataFrame(c)
-
-
-
-
-# ### Get Likers Informations
-
-# standart_properties = [
-#     'username',
-#     'full_name',
-#     'biography',
-#     'external_url',
-#     'is_private',
-#     'is_verified',
-#     'is_business',
-#     'public_email',
-#     'public_phone_number',
-#     'public_phone_country_code',
-#     'media_count',
-#     'follower_count',
-#     'following_count',
-#     'can_be_reported_as_fraud', 
-#     'longitude', 
-#     'latitude']
-
-# data = pd.read_csv(path_save_comment)
-# users_likes = data.id_commentor.drop_duplicates().to_list()
-
-
-# total_connect = []
-# if 'total_connect' not in globals():
-#     total_connect = []
-#     cn = 0
-#     for i in users:
-#         cn += 1
-#         globals()['instagram_%s' % cn] = Instagram(0)
-#         inst = globals()['instagram_%s' % cn]
-#         u, p = i
-#         print(u)
-#         inst.with_credentials(u, p)
-#         inst.login()
-#         print(inst.get_account(f'{page_name}'))
-#         total_connect.append(inst)
-
-
-# info_users = {k: None for k in users_likes}
-# info_users_jason = {k: None for k in users_likes}
-# from igramscraper.get_info_json import get_user_info_by_id
-
-
-# for u in tqdm(users_likes):
-#     print(u)
-#     instagram = random.choice(total_connect)
-#     info = get_user_info_by_id(u, instagram)
-#     json_string = json.dumps(info)
-    
-#     with open(path_data+f'/{u}.json', 'w') as outfile:
-#         outfile.write(json_string)
-    
-#     info = info['user']
-#     all_= info.keys()
-#     nec_info =  {k: None for k in standart_properties}
-#     for k in standart_properties:
-#         try:
-#             nec_info[k] = info[k]
-#         except:
-#             nec_info[k] = None
-#     info_users[u] = pd.DataFrame(nec_info, index= ['info']).T
+    state = {
+        "page_name": args.page_name,
+        "cursors": cursors,
+        "pending": [],
+        "failures": failures,
+        "failed": sorted(set(failed)),
+        "completed": True,
+    }
+    save_outputs(comments, replies, output_dir, state)
+    LOGGER.info("Finished: %s comments, %s replies, %s failed posts", len(comments), len(replies), len(set(failed)))
+    return 0
 
 
-
-# all_users = pd.concat(info_users).reset_index(col_level=0)
-# all_users.columns = ['user_ID','level_1' ,'info_user']
-# all_users = all_users.pivot('user_ID', columns= 'level_1', values='info_user')
-
-
-# all_users.to_csv(path_user_info, index_label= False)
-
-# pd.read_csv(path_user_info)
-
-
-
+if __name__ == "__main__":
+    raise SystemExit(main())
